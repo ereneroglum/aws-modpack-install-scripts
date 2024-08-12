@@ -1,0 +1,150 @@
+---
+- hosts: all
+  vars:
+    server_directory: "/minecraft"
+    java_package: "java-17-amazon-corretto-headless"
+    server_pack: "https://github.com/ThePansmith/Monifactory/releases/download/0.7.7/Monifactory-Beta.0.7.7-server.zip"
+    forge_installer: "https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.3.0/forge-1.20.1-47.3.0-installer.jar"
+    user_jvm_args: |-
+      -Xms12G
+      -Xmx12G
+      -XX:+UseG1GC
+      -XX:+ParallelRefProcEnabled
+      -XX:MaxGCPauseMillis=200
+      -XX:+UnlockExperimentalVMOptions
+      -XX:+DisableExplicitGC
+      -XX:+AlwaysPreTouch
+      -XX:G1NewSizePercent=30
+      -XX:G1MaxNewSizePercent=40
+      -XX:G1HeapRegionSize=32M
+      -XX:G1ReservePercent=20
+      -XX:G1HeapWastePercent=5
+      -XX:G1MixedGCCountTarget=4
+      -XX:InitiatingHeapOccupancyPercent=15
+      -XX:G1MixedGCLiveThresholdPercent=90
+      -XX:G1RSetUpdatingPauseTimePercent=5
+      -XX:SurvivorRatio=32
+      -XX:+PerfDisableSharedMem
+      -XX:MaxTenuringThreshold=1
+      -Dusing.aikars.flags=https://mcflags.emc.gs
+      -Daikars.new.flags=true
+
+  vars_prompt:
+    - name: rcon_password
+      prompt: "Rcon password"
+    - name: online_mode
+      prompt: "Online mode"
+      private: false
+    - name: eula
+      prompt: "EULA. Read at https://account.mojang.com/documents/minecraft_eula. By answering 'true' you are accepting the EULA"
+      private: false
+
+  tasks:
+    - name: Create minecraft group
+      ansible.builtin.group:
+        name: minecraft
+        state: present
+
+    - name: Create minecraft user
+      ansible.builtin.user:
+        name: minecraft
+        state: present
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+
+    - name: Create server directory
+      ansible.builtin.file:
+        path: "{{ server_directory }}"
+        state: directory
+        owner: minecraft
+        group: minecraft
+        mode: "750"
+        recurse: yes
+
+    - name: Download and unarchive server pack
+      ansible.builtin.unarchive:
+        src: "{{ server_pack }}"
+        remote_src: "yes"
+        dest: "{{ server_directory }}"
+        owner: minecraft
+        group: minecraft
+
+    # FIXME
+    - name: Move server files to correct location
+      ansible.builtin.shell:
+        cmd: "mv \"{{ server_directory }}\"/overrides/* \"{{ server_directory }}\""
+
+    - name: Install java
+      yum:
+        name: "{{ java_package }}"
+        state: present
+
+    - name: Download forge installer
+      ansible.builtin.get_url:
+        url: "{{ forge_installer }}"
+        dest: "{{ server_directory }}/forge-installer.jar"
+        owner: minecraft
+        group: minecraft
+        mode: "644"
+
+    - name: Install forge
+      become: true
+      become_user: minecraft
+      ansible.builtin.shell:
+        cmd: "java -jar forge-installer.jar --installServer"
+        chdir: "{{ server_directory }}"
+
+    - name: Setup JVM arguments
+      ansible.builtin.copy:
+        content: "{{ user_jvm_args }}"
+        dest: "{{ server_directory }}/user_jvm_args.txt"
+        owner: minecraft
+        group: minecraft
+
+    - name: Setup server.properties
+      ansible.builtin.copy:
+        content: |-
+          allow-flight=true
+          online-mode={{ online_mode }}
+          enable-rcon=true
+          rcon.password={{ rcon_password }}
+        dest: "{{ server_directory }}/server.properties"
+        owner: minecraft
+        group: minecraft
+
+    - name: Setup eula
+      ansible.builtin.copy:
+        content: "eula={{ eula }}"
+        dest: "{{ server_directory }}/eula.txt"
+        owner: minecraft
+        group: minecraft
+
+    - name: Setup systemd service
+      ansible.builtin.copy:
+        content: |-
+          [Unit]
+          Description=Minecraft Server
+          After=network.target
+
+          [Install]
+          WantedBy=multi-user.target
+
+          [Service]
+          User=minecraft
+          Group=minecraft
+          WorkingDirectory={{ server_directory }}
+          Type=forking
+          ExecStart=/usr/bin/screen -dmS minecraft /usr/bin/bash {{ server_directory }}/run.sh
+          ExecStop=/usr/bin/screen -S minecraft -X stuff \"stop^M\"
+        dest: "/etc/systemd/system/minecraft.service"
+        owner: root
+        group: root
+        mode: "644"
+
+    - name: Ensure minecraft service is started and enabled
+      ansible.builtin.systemd_service:
+        name: minecraft
+        daemon_reload: true
+        state: started
+        enabled: true
