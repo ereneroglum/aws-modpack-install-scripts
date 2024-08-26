@@ -2,7 +2,7 @@
 
 ## Quickstart
 
-To start, step by step 
+To start, step by step
 
 1. Create a r8g.* persistant spot instance in AWS with Amazon Linux AMI.
 2. Allow access from TCP port 21 and 25566 on your computers IP
@@ -27,4 +27,5 @@ ansible_ssh_private_key_file=<PATH TO SSH KEY>
 | **Modpack** | **Version** |   **Forge**   |
 |:-----------:|:-----------:|:-------------:|
 |    ATM 9    |    0.3.0    |               |
+|  ATM 9 TTS  |    1.1.1    |               |
 | Monifactory |    0.7.7    | 1.20.1-47.3.0 |
